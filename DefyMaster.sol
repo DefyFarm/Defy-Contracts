@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 //DefyFarm Website : https://defy.farm
-//DefyFarm Telegram : https://t.me/defy_farm
+//DefyFarm Telegram : https://t.me/defy_farm_V2
 
 pragma solidity 0.6.12;
-
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address payable) {
@@ -543,7 +542,7 @@ contract Ownable is Context {
     }
 }
 
-contract DefyCoin is Context, IBEP20, Ownable {
+contract DefyCoinV2 is Context, IBEP20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
@@ -554,44 +553,51 @@ contract DefyCoin is Context, IBEP20, Ownable {
     mapping (address => bool) private _isExcluded;
     address[] private _excluded;
     
-    string  private constant _NAME = 'DefyCoin';
+    string  private constant _NAME = 'DefyCoinV2';
     string  private constant _SYMBOL = 'DEFY';
-    uint8   private constant _DECIMALS = 8;
+    uint8   private constant _DECIMALS = 18;
    
     uint256 private constant _MAX = ~uint256(0);
     uint256 private constant _DECIMALFACTOR = 10 ** uint256(_DECIMALS);
     uint256 private constant _GRANULARITY = 100;
     
-    uint256 private _tTotal = 1 * 10**5 * _DECIMALFACTOR;
+    uint256 private _tTotal = 3 * 10**5 * _DECIMALFACTOR;
     uint256 private _rTotal = (_MAX - (_MAX % _tTotal));
     
     uint256 private _tFeeTotal;
     uint256 private _tBurnTotal;
     
     uint256 private constant     _TAX_FEE = 200;
-    uint256 private constant    _BURN_FEE = 250;
+    uint256 private constant    _BURN_FEE = 200;
     uint256 private constant    _FARM_FEE = 500;
+    uint256 private constant     _ILP_FEE = 50;    
     uint256 private constant     _DEV_FEE = 50;
-    uint256 private constant _MAX_TX_SIZE = 100000000 * _DECIMALFACTOR;
+    uint256 private constant _MAX_TX_SIZE = 300000 * _DECIMALFACTOR;
     
     address private WDev = 0x9623f62B056F06c392F764286893e14066C46928;
     address private WFarm = 0xB0596C3A70B81d1C89cF359f6C8695D2CEBB7C7D;
+    address public WDefyIlp;
     address public WDefymaster;
+    address public WDefyswapper;
+    bool public TakeFee;
 
-    constructor () public {
+    constructor (address _WDefyIlp, bool _takeFee)
+        public {
         _rOwned[_msgSender()] = _rTotal;
+        WDefyIlp = _WDefyIlp;
+        TakeFee = _takeFee;
         emit Transfer(address(0), _msgSender(), _tTotal);
     }
 
-    function name() public view returns (string memory) {
+    function name() public pure returns (string memory) {
         return _NAME;
     }
 
-    function symbol() public view returns (string memory) {
+    function symbol() public pure returns (string memory) {
         return _SYMBOL;
     }
 
-    function decimals() public view returns (uint8) {
+    function decimals() public pure returns (uint8) {
         return _DECIMALS;
     }
 
@@ -638,8 +644,23 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return _isExcluded[account];
     }
     
+    function setWDefyIlp(address _WDefyIlp)public onlyOwner returns (bool){
+        WDefyIlp = _WDefyIlp;
+         return true;
+    }
+
     function setWdefymaster(address _defymaster)public onlyOwner returns (bool){
         WDefymaster = _defymaster;
+         return true;
+    }
+    
+    function setWdefySwapper(address _defyswapper)public onlyOwner returns (bool){
+        WDefyswapper = _defyswapper;
+         return true;
+    }
+    
+    function setTakeFee(bool _takefee)public onlyOwner returns (bool){
+        TakeFee = _takefee;
          return true;
     }
 
@@ -658,6 +679,22 @@ contract DefyCoin is Context, IBEP20, Ownable {
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rTotal = _rTotal.sub(rAmount);
         _tFeeTotal = _tFeeTotal.add(tAmount);
+    }
+    
+    function burn(uint256 tAmount) public {
+        
+        address sender = _msgSender();
+        require(sender != address(0), "BEP20: transfer from the zero address");
+        require(tAmount > 0, "Transfer amount must be greater than zero");
+
+        uint256 currentRate =  _getRate();
+        uint256 rAmount =  tAmount.mul(currentRate);
+        
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _rTotal = _rTotal.sub(rAmount);
+        _tBurnTotal = _tBurnTotal.add(tAmount);
+        _tTotal = _tTotal.sub(tAmount);
+        
     }
 
     function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
@@ -710,13 +747,15 @@ contract DefyCoin is Context, IBEP20, Ownable {
 
     function _transfer(address sender, address recipient, uint256 amount) private {
         require(sender != address(0), "BEP20: transfer from the zero address");
-        require(recipient != address(0), "BEP20: transfer to the zero address");
+    //    require(recipient != address(0), "BEP20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
         
         if(sender != owner() && recipient != owner())
             require(amount <= _MAX_TX_SIZE, "Transfer amount exceeds the maxTxAmount.");
         
-        if (sender == WFarm || sender == WDefymaster) {
+        if(TakeFee){
+        
+        if (sender == WFarm || sender == WDefymaster || sender == WDev || sender == WDefyIlp || sender == WDefyswapper) {
             _transferFromDefy(sender, recipient, amount);
         } else if (_isExcluded[sender] && !_isExcluded[recipient]) {
             _transferFromExcluded(sender, recipient, amount);
@@ -728,6 +767,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
             _transferBothExcluded(sender, recipient, amount);
         } else {
             _transferStandard(sender, recipient, amount);
+        } }
+        else {
+             _transferFromDefy(sender, recipient, amount);
         }
    }
 
@@ -740,7 +782,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -754,7 +798,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -768,7 +814,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -783,7 +831,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
     
@@ -797,8 +847,8 @@ contract DefyCoin is Context, IBEP20, Ownable {
         emit Transfer(sender, recipient, tAmount);
     }
 
-    function _reflectFee(uint256 rFee, uint256 rBurn, uint256 tFee, uint256 tBurn) private {
-        _rTotal = _rTotal.sub(rFee).sub(rBurn);
+    function _reflectFee(uint256 rFee, uint256 rBurn, uint256 rDev, uint256 rFarm, uint256 rIlp, uint256 tFee, uint256 tBurn) private {
+        _rTotal = _rTotal.sub(rFee).add(rDev).add(rFarm).add(rIlp).sub(rBurn);
         _tFeeTotal = _tFeeTotal.add(tFee);
         _tBurnTotal = _tBurnTotal.add(tBurn);
         _tTotal = _tTotal.sub(tBurn);
@@ -816,8 +866,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
     function _getTValues(uint256 tAmount, uint256 burnFee) private view returns (uint256, uint256, uint256) {
 
         uint256 tBurn = ((tAmount.mul(burnFee)).div(_GRANULARITY)).div(100);
-        (,,,uint256 tTax, uint256 tFarm, uint256 tDev) = _getValues2(tAmount);  
-        uint256 tFee = tTax.add(tFarm).add(tDev);
+        (,,,uint256 tTax, uint256 tFarm, uint256 tDev) = _getValues2(tAmount);
+        (, uint256 tIlp) = _getIlp(tAmount);
+        uint256 tFee = tTax.add(tFarm).add(tDev).add(tIlp);
         uint256 tTransferAmount = tAmount.sub(tFee).sub(tBurn);
         return (tTransferAmount, tFee, tBurn);
     }
@@ -827,7 +878,8 @@ contract DefyCoin is Context, IBEP20, Ownable {
         
         uint256 rBurn = tBurn.mul(currentRate);
         (uint256 rTax, uint256 rFarm, uint256 rDev, , , ) = _getValues2(tAmount);
-        uint256 rFee = rTax.add(rFarm).add(rDev);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        uint256 rFee = rTax.add(rFarm).add(rDev).add(rIlp);
         uint256 rTransferAmount = rAmount.sub(rFee).sub(rBurn);
         return (rAmount, rTransferAmount, rFee);
     }
@@ -839,7 +891,7 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return (rTax, rFarm, rDev, tTax, tFarm, tDev);
     }
     
-        function _getValues3(uint256 tAmount) private view returns (uint256, uint256, uint256) {
+    function _getValues3(uint256 tAmount) private view returns (uint256, uint256, uint256) {
         ( uint256 rTax, uint256 rFarm, uint256 rDev,,,) = _getValues2(tAmount);
         return (rTax, rFarm, rDev);
     }
@@ -857,7 +909,23 @@ contract DefyCoin is Context, IBEP20, Ownable {
         uint256 rTax = tTax.mul(currentRate);
         return (rFarm, rDev, rTax);
     }
+    
+    function _getIlp(uint256 tAmount) private view returns (uint256, uint256) {
+        (uint256 tIlp) = _getTIlp(tAmount, _ILP_FEE);
+        uint256 currentRate =  _getRate();
+        (uint256 rIlp) = _getRIlp(tIlp, currentRate);
+        return (rIlp, tIlp);
+    }
+    
+    function _getTIlp(uint256 tAmount, uint256 ilpFee) private pure returns (uint256) {
+        uint256 tIlp = ((tAmount.mul(ilpFee)).div(_GRANULARITY)).div(100);
+        return (tIlp);
+    }
 
+    function _getRIlp(uint256 tIlp, uint256 currentRate) private pure returns (uint256) {
+        uint256 rIlp = tIlp.mul(currentRate);
+        return (rIlp);
+    }
 
     function _getRate() private view returns(uint256) {
         (uint256 rSupply, uint256 tSupply) = _getCurrentSupply();
@@ -876,32 +944,28 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return (rSupply, tSupply);
     }
     
-    function _getTaxFee() private view returns(uint256) {
+    function _getTaxFee() private pure returns(uint256) {
         return _TAX_FEE;
     }
 
-    function _getMaxTxAmount() private view returns(uint256) {
+    function _getMaxTxAmount() private pure returns(uint256) {
         return _MAX_TX_SIZE;
     }
     
 }
 
-interface IMigratorChef {
-    // Perform LP token migration from legacy Defy0 to Defy1.
-    // Take the current LP token address and return the new LP token address.
-    // Migrator should have full access to the caller's LP token.
-    // Return the new LP token address.
-    //
-    // XXX Migrator must have allowance access to Defy0 LP tokens.
-    // Defy1 must mint EXACTLY the same amount of Defy1 LP tokens or
-    // else something bad will happen. Traditional Defy does not
-    // do that so be careful!
-    function migrate(IBEP20 token) external returns (IBEP20);
-}
-
 // DefyMaster is the master of Defy. Even he can not make DEFY and but he is a fair guy. :D
 //
 // Have fun reading it. Hopefully it's bug-free.
+
+interface ImpermenantLossProtection{
+	//IMPERMENANT LOSS PROTECTION ABI
+    function add(address _lpToken, IBEP20 _token0, IBEP20 _token1, bool _offerILP) external; 
+    function set(uint256 _pid, address _lpToken, IBEP20 _token0,IBEP20 _token1, bool _offerILP) external;
+    function getDepositValue(uint256 amount, uint256 _pid) external view returns (uint256 userDepValue);
+    function defyTransfer(address _to, uint256 _amount) external;
+    function getDefyPrice() external view returns (uint256 defyPrice);
+}
 
 contract DefyMaster is Ownable {
     using SafeMath for uint256;
@@ -911,6 +975,8 @@ contract DefyMaster is Ownable {
     struct UserInfo {
         uint256 amount; // How many LP tokens the user has provided.
         uint256 rewardDebt; // Reward debt. See explanation below.
+		uint256 depositTime;
+		uint256 depVal;
         //
         // We do some fancy math here. Basically, any point in time, the amount of Defy
         // entitled to a user but is pending to be distributed is:
@@ -929,22 +995,24 @@ contract DefyMaster is Ownable {
         IBEP20 lpToken; // Address of LP token contract.
         uint256 allocPoint; // How many allocation points assigned to this pool. Defy to distribute per block.
         uint256 lastRewardBlock; // Last block number that Defy distribution occurs.
-        uint256 accdefyPerShare; // Accumulated DEFY per share, times 1e12. See below.
+        uint256 accdefyPerShare; // Accumulated DEFY per share, times 1e18. See below.
+		IBEP20 token0;
+		IBEP20 token1;
+		bool impermenantLossProtection;
     }
 
     // The DEFY TOKEN!
-    DefyCoin public defy;
+    DefyCoinV2 public defy;
     // Dev address.
     address public devaddr;
-    // Dev address.
+	//ILP Contract
+    ImpermenantLossProtection public ilp;
+	//farmsender
     address public farmsender;
     // defy tokens distributed per block.
-    uint256 public defyPerBlock ;
+    uint256 public defyPerBlock;
     // Bonus muliplier for early defy makers.
     uint256 public BONUS_MULTIPLIER = 1;
-    // The migrator contract. It has a lot of power. Can only be set through governance (owner).
-    IMigratorChef public migrator;
-    uint256 public constant maxSupply = 100000 ether;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -964,13 +1032,15 @@ contract DefyMaster is Ownable {
     );
 
     constructor(
-        DefyCoin _defy,
-        address _devaddr,
-        uint256 _startBlock
+        DefyCoinV2 _defy,
+        address _devaddr
     ) public {
         defy = _defy;
         devaddr = _devaddr;
-        startBlock = _startBlock;
+    }
+	
+	function setImpermenantLossProtection(address _ilp)public onlyOwner returns (bool){
+        ilp = ImpermenantLossProtection(_ilp);
     }
     
     function setFarmsender(address _farmsender)public onlyOwner returns (bool){
@@ -978,10 +1048,22 @@ contract DefyMaster is Ownable {
          return true;
     }
 
+	function getUserInfo(uint256 pid, address userAddr) 
+		public 
+		view 
+		returns(uint256 deposit, uint256 rewardDebt, uint256 daysSinceDeposit, uint256 depVal)
+	{
+		UserInfo storage user = userInfo[pid][userAddr];
+		return (user.amount, user.rewardDebt, _getDaysSinceDeposit(pid, userAddr), user.depVal);
+	}
     
     function updateReward(uint256 reward) public {
        require(msg.sender == farmsender || msg.sender == devaddr, "dev: wut?");
         defyPerBlock = reward.div(20*60*24);
+    }
+    
+    function setstartblock(uint256 sblock) public onlyOwner{
+        startBlock = sblock;
     }
 
     function updateMultiplier(uint256 multiplierNumber) public onlyOwner {
@@ -997,12 +1079,17 @@ contract DefyMaster is Ownable {
     function add(
         uint256 _allocPoint,
         IBEP20 _lpToken,
+		IBEP20 _token0,
+		IBEP20 _token1,
+		bool _offerILP,
         bool _withUpdate
     ) public onlyOwner {
         if (_withUpdate) {
             massUpdatePools();
         }
-        uint256 lastRewardBlock =
+		ilp.add(address(_lpToken), _token0, _token1, _offerILP);
+        
+		uint256 lastRewardBlock =
             block.number > startBlock ? block.number : startBlock;
         totalAllocPoint = totalAllocPoint.add(_allocPoint);
         poolInfo.push(
@@ -1010,7 +1097,10 @@ contract DefyMaster is Ownable {
                 lpToken: _lpToken,
                 allocPoint: _allocPoint,
                 lastRewardBlock: lastRewardBlock,
-                accdefyPerShare: 0
+                accdefyPerShare: 0,
+				token0: _token0,
+				token1: _token1,
+				impermenantLossProtection: _offerILP
             })
         );
     }
@@ -1019,32 +1109,24 @@ contract DefyMaster is Ownable {
     function set(
         uint256 _pid,
         uint256 _allocPoint,
+        address _lpToken,
+		IBEP20 _token0,
+		IBEP20 _token1,
+		bool _offerILP,
         bool _withUpdate
     ) public onlyOwner {
         if (_withUpdate) {
             massUpdatePools();
         }
+		ilp.set(_pid, _lpToken, _token0, _token1, _offerILP);
+		
         totalAllocPoint = totalAllocPoint.sub(poolInfo[_pid].allocPoint).add(
             _allocPoint
         );
+		poolInfo[_pid].token0 =_token0;
+		poolInfo[_pid].token1 = _token1;
         poolInfo[_pid].allocPoint = _allocPoint;
-    }
-
-    // Set the migrator contract. Can only be called by the owner.
-    function setMigrator(IMigratorChef _migrator) public onlyOwner {
-        migrator = _migrator;
-    }
-
-    // Migrate lp token to another lp contract. Can be called by anyone. We trust that migrator contract is good.
-    function migrate(uint256 _pid) public {
-        require(address(migrator) != address(0), "migrate: no migrator");
-        PoolInfo storage pool = poolInfo[_pid];
-        IBEP20 lpToken = pool.lpToken;
-        uint256 bal = lpToken.balanceOf(address(this));
-        lpToken.safeApprove(address(migrator), bal);
-        IBEP20 newLpToken = migrator.migrate(lpToken);
-        require(bal == newLpToken.balanceOf(address(this)), "migrate: bad");
-        pool.lpToken = newLpToken;
+		poolInfo[_pid].impermenantLossProtection = _offerILP;
     }
 
     // Return reward multiplier over the given _from to _to block.
@@ -1074,16 +1156,16 @@ contract DefyMaster is Ownable {
                     totalAllocPoint
                 );
             accdefyPerShare = accdefyPerShare.add(
-                defyReward.mul(1e12).div(lpSupply)
+                defyReward.mul(1e18).div(lpSupply)
             );
         }
-        return user.amount.mul(accdefyPerShare).div(1e12).sub(user.rewardDebt);
+        return user.amount.mul(accdefyPerShare).div(1e18).sub(user.rewardDebt);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
     function massUpdatePools() public {
         uint256 length = poolInfo.length;
-        for (uint256 pid = 0; pid < length; ++pid) {
+        for (uint256 pid = 0; pid < length; pid++) {
             updatePool(pid);
         }
     }
@@ -1106,7 +1188,7 @@ contract DefyMaster is Ownable {
             );
  
             pool.accdefyPerShare = pool.accdefyPerShare.add(
-                defyReward.mul(1e12).div(lpSupply)
+                defyReward.mul(1e18).div(lpSupply)
             );
             pool.lastRewardBlock = block.number;
             return;
@@ -1114,52 +1196,80 @@ contract DefyMaster is Ownable {
     }
 
     // Deposit LP tokens to DefyMaster for DEFY allocation.
-    function deposit(uint256 _pid, uint256 _amount) public {
-
+    function deposit(uint256 _pid, uint256 _amount) 
+	public 
+	{
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
-        if (user.amount > 0) {
-            uint256 pending =
-                user.amount.mul(pool.accdefyPerShare).div(1e12).sub(
-                    user.rewardDebt
-                );
-            if (pending > 0) {
-                safedefyTransfer(msg.sender, pending);
-            }
+		
+		uint256 xfAmt = _amount;
+		if(xfAmt > pool.lpToken.balanceOf(msg.sender))
+			xfAmt = pool.lpToken.balanceOf(msg.sender);
+		
+		//ILP
+		uint256 extraDefy = 0;
+		if(pool.impermenantLossProtection)
+			if(user.amount > 0)
+				if(_getDaysSinceDeposit(_pid, msg.sender) >= 30)
+					extraDefy = _checkForIL(_pid, user);
+		
+        if(user.amount > 0) {
+            uint256 pending = user.amount.mul(pool.accdefyPerShare).div(1e18).sub(user.rewardDebt);
+			
+			if (pending > 0)
+				safedefyTransfer(msg.sender, pending);
+			if(extraDefy > 0 && extraDefy > pending)
+				ilp.defyTransfer(msg.sender, extraDefy.sub(pending));
+			
         }
-        if (_amount > 0) {
-            pool.lpToken.safeTransferFrom(
-                address(msg.sender),
-                address(this),
-                _amount
-            );
-            user.amount = user.amount.add(_amount);
+        if(xfAmt > 0) {
+			pool.lpToken.safeTransferFrom(address(msg.sender), address(this), xfAmt);
+            user.amount = user.amount.add(xfAmt);
         }
-        user.rewardDebt = user.amount.mul(pool.accdefyPerShare).div(1e12);
-        emit Deposit(msg.sender, _pid, _amount);
+		
+		user.depVal = ilp.getDepositValue(user.amount, _pid);
+		user.depositTime = block.timestamp;
+        user.rewardDebt = user.amount.mul(pool.accdefyPerShare).div(1e18);
+        emit Deposit(msg.sender, _pid, xfAmt);
     }
 
     // Withdraw LP tokens from DefyMaster.
     function withdraw(uint256 _pid, uint256 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        require(user.amount >= _amount, "withdraw: not good");
+		require(user.amount > 0, "Nothing deposited.");
+		
+		uint256 xfAmt = _amount;
+		if(xfAmt > user.amount)
+			xfAmt = user.amount;
+		
+		uint256 extraDefy = 0;
+		if(pool.impermenantLossProtection){
+			if(_getDaysSinceDeposit(_pid, msg.sender) >= 30){
+				extraDefy = _checkForIL(_pid, user);
+			}
+		}
 
         updatePool(_pid);
         uint256 pending =
-            user.amount.mul(pool.accdefyPerShare).div(1e12).sub(
+            user.amount.mul(pool.accdefyPerShare).div(1e18).sub(
                 user.rewardDebt
             );
-        if (pending > 0) {
-            safedefyTransfer(msg.sender, pending);
+			if (pending > 0)
+				safedefyTransfer(msg.sender, pending);
+			if(extraDefy > 0 && extraDefy > pending)
+				ilp.defyTransfer(msg.sender, extraDefy.sub(pending));
+			
+        if(xfAmt > 0) {
+            user.amount = user.amount.sub(xfAmt);
+            pool.lpToken.safeTransfer(address(msg.sender), xfAmt);
         }
-        if (_amount > 0) {
-            user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
-        }
-        user.rewardDebt = user.amount.mul(pool.accdefyPerShare).div(1e12);
-        emit Withdraw(msg.sender, _pid, _amount);
+		
+		user.depVal = ilp.getDepositValue(user.amount, _pid);
+		user.depositTime = block.timestamp;
+        user.rewardDebt = user.amount.mul(pool.accdefyPerShare).div(1e18);
+        emit Withdraw(msg.sender, _pid, xfAmt);
     }
 
     // Withdraw without caring about rewards. EMERGENCY ONLY.
@@ -1181,5 +1291,49 @@ contract DefyMaster is Ownable {
     function dev(address _devaddr) public {
         require(msg.sender == devaddr, "dev: wut?");
         devaddr = _devaddr;
+    }
+		
+	//Time Functions
+    function getDaysSinceDeposit(uint256 pid, address userAddr)
+        external
+        view
+        returns (uint256 daysSinceDeposit)
+    {
+        return _getDaysSinceDeposit(pid, userAddr);
+    }
+    function _getDaysSinceDeposit(uint256 _pid, address _userAddr)
+        internal
+        view
+        returns (uint256)
+    {
+		UserInfo storage user = userInfo[_pid][_userAddr];
+		
+        if (block.timestamp < user.depositTime){	
+             return 0;	
+        }else{	
+             return (block.timestamp.sub(user.depositTime)) / 1 days;	
+        }
+    }
+	
+    function checkForIL(uint256 pid, address userAddr)
+        external
+        view
+        returns (uint256 extraDefy)
+    {
+		UserInfo storage user = userInfo[pid][userAddr];
+		return _checkForIL(pid, user);
+    }
+    function _checkForIL(uint256 _pid, UserInfo storage user)
+        internal
+        view
+        returns (uint256)
+    {
+		uint256 defyPrice = ilp.getDefyPrice();
+		uint256 currentVal = ilp.getDepositValue(user.amount, _pid);
+		
+		if(currentVal < user.depVal){
+			uint256 difference = user.depVal.sub(currentVal);
+			return difference.div(defyPrice);
+		}else return 0;
     }
 }

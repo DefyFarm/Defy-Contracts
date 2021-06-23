@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //DefyFarm Website : https://defy.farm
-//DefyFarm Telegram : https://t.me/defy_farm
+//DefyFarm Telegram : https://t.me/defy_farm_V2
 
 pragma solidity ^0.6.0;
 
@@ -450,7 +450,7 @@ contract Ownable is Context {
     }
 }
 
-contract DefyCoin is Context, IBEP20, Ownable {
+contract DefyCoinV2 is Context, IBEP20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
@@ -461,44 +461,51 @@ contract DefyCoin is Context, IBEP20, Ownable {
     mapping (address => bool) private _isExcluded;
     address[] private _excluded;
     
-    string  private constant _NAME = 'DefyCoin';
+    string  private constant _NAME = 'DefyCoinV2';
     string  private constant _SYMBOL = 'DEFY';
-    uint8   private constant _DECIMALS = 8;
+    uint8   private constant _DECIMALS = 18;
    
     uint256 private constant _MAX = ~uint256(0);
     uint256 private constant _DECIMALFACTOR = 10 ** uint256(_DECIMALS);
     uint256 private constant _GRANULARITY = 100;
     
-    uint256 private _tTotal = 1 * 10**5 * _DECIMALFACTOR;
+    uint256 private _tTotal = 3 * 10**5 * _DECIMALFACTOR;
     uint256 private _rTotal = (_MAX - (_MAX % _tTotal));
     
     uint256 private _tFeeTotal;
     uint256 private _tBurnTotal;
     
     uint256 private constant     _TAX_FEE = 200;
-    uint256 private constant    _BURN_FEE = 250;
+    uint256 private constant    _BURN_FEE = 200;
     uint256 private constant    _FARM_FEE = 500;
+    uint256 private constant     _ILP_FEE = 50;    
     uint256 private constant     _DEV_FEE = 50;
-    uint256 private constant _MAX_TX_SIZE = 100000000 * _DECIMALFACTOR;
+    uint256 private constant _MAX_TX_SIZE = 300000 * _DECIMALFACTOR;
     
     address private WDev = 0x9623f62B056F06c392F764286893e14066C46928;
     address private WFarm = 0xB0596C3A70B81d1C89cF359f6C8695D2CEBB7C7D;
+    address public WDefyIlp;
     address public WDefymaster;
+    address public WDefyswapper;
+    bool public TakeFee;
 
-    constructor () public {
+    constructor (address _WDefyIlp, bool _takeFee)
+        public {
         _rOwned[_msgSender()] = _rTotal;
+        WDefyIlp = _WDefyIlp;
+        TakeFee = _takeFee;
         emit Transfer(address(0), _msgSender(), _tTotal);
     }
 
-    function name() public view returns (string memory) {
+    function name() public pure returns (string memory) {
         return _NAME;
     }
 
-    function symbol() public view returns (string memory) {
+    function symbol() public pure returns (string memory) {
         return _SYMBOL;
     }
 
-    function decimals() public view returns (uint8) {
+    function decimals() public pure returns (uint8) {
         return _DECIMALS;
     }
 
@@ -545,8 +552,23 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return _isExcluded[account];
     }
     
+    function setWDefyIlp(address _WDefyIlp)public onlyOwner returns (bool){
+        WDefyIlp = _WDefyIlp;
+         return true;
+    }
+
     function setWdefymaster(address _defymaster)public onlyOwner returns (bool){
         WDefymaster = _defymaster;
+         return true;
+    }
+    
+    function setWdefySwapper(address _defyswapper)public onlyOwner returns (bool){
+        WDefyswapper = _defyswapper;
+         return true;
+    }
+    
+    function setTakeFee(bool _takefee)public onlyOwner returns (bool){
+        TakeFee = _takefee;
          return true;
     }
 
@@ -565,6 +587,22 @@ contract DefyCoin is Context, IBEP20, Ownable {
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rTotal = _rTotal.sub(rAmount);
         _tFeeTotal = _tFeeTotal.add(tAmount);
+    }
+    
+    function burn(uint256 tAmount) public {
+        
+        address sender = _msgSender();
+        require(sender != address(0), "BEP20: transfer from the zero address");
+        require(tAmount > 0, "Transfer amount must be greater than zero");
+
+        uint256 currentRate =  _getRate();
+        uint256 rAmount =  tAmount.mul(currentRate);
+        
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _rTotal = _rTotal.sub(rAmount);
+        _tBurnTotal = _tBurnTotal.add(tAmount);
+        _tTotal = _tTotal.sub(tAmount);
+        
     }
 
     function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
@@ -617,13 +655,15 @@ contract DefyCoin is Context, IBEP20, Ownable {
 
     function _transfer(address sender, address recipient, uint256 amount) private {
         require(sender != address(0), "BEP20: transfer from the zero address");
-        require(recipient != address(0), "BEP20: transfer to the zero address");
+    //    require(recipient != address(0), "BEP20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
         
         if(sender != owner() && recipient != owner())
             require(amount <= _MAX_TX_SIZE, "Transfer amount exceeds the maxTxAmount.");
         
-        if (sender == WFarm || sender == WDefymaster || sender == WDev) {
+        if(TakeFee){
+        
+        if (sender == WFarm || sender == WDefymaster || sender == WDev || sender == WDefyIlp || sender == WDefyswapper) {
             _transferFromDefy(sender, recipient, amount);
         } else if (_isExcluded[sender] && !_isExcluded[recipient]) {
             _transferFromExcluded(sender, recipient, amount);
@@ -635,6 +675,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
             _transferBothExcluded(sender, recipient, amount);
         } else {
             _transferStandard(sender, recipient, amount);
+        } }
+        else {
+             _transferFromDefy(sender, recipient, amount);
         }
    }
 
@@ -647,7 +690,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -661,7 +706,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -675,7 +722,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
@@ -690,22 +739,64 @@ contract DefyCoin is Context, IBEP20, Ownable {
         (, uint256 rFarm, uint256 rDev) = _getValues3(tAmount);
         _rOwned[WDev] = _rOwned[WDev].add(rDev);
         _rOwned[WFarm] = _rOwned[WFarm].add(rFarm);
-        _reflectFee(rFee, rBurn, tFee, tBurn);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        _rOwned[WDefyIlp] = _rOwned[WDefyIlp].add(rIlp);
+        _reflectFee(rFee, rBurn, rDev, rFarm, rIlp, tFee, tBurn);
         emit Transfer(sender, recipient, tTransferAmount);
     }
     
     function _transferFromDefy(address sender, address recipient, uint256 tAmount) private {
 
         (uint256 rAmount, , , , , ) = _getValues(tAmount);
+        
+//transferfromexcluded
 
+        if (_isExcluded[sender] && !_isExcluded[recipient]) {
+            
+        _tOwned[sender] = _tOwned[sender].sub(tAmount);
         _rOwned[sender] = _rOwned[sender].sub(rAmount);
         _rOwned[recipient] = _rOwned[recipient].add(rAmount);
+        } 
+        
+//transferToExcluded
+        
+        else if (!_isExcluded[sender] && _isExcluded[recipient]) {
+            
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _tOwned[recipient] = _tOwned[recipient].add(tAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(rAmount);
+        } 
+        
+//transferStandard
+        
+        else if (!_isExcluded[sender] && !_isExcluded[recipient]) {
+            
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(rAmount);
+        }
+        
+//transferBothExcluded        
+        
+        else if (_isExcluded[sender] && _isExcluded[recipient]) {
+            
+        _tOwned[sender] = _tOwned[sender].sub(tAmount);
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _tOwned[recipient] = _tOwned[recipient].add(tAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(rAmount);
+        } 
+        
+//transferStandard        
+        
+        else {
+        _rOwned[sender] = _rOwned[sender].sub(rAmount);
+        _rOwned[recipient] = _rOwned[recipient].add(rAmount);
+        } 
 
-        emit Transfer(sender, recipient, tAmount);
+       emit Transfer(sender, recipient, tAmount);
     }
 
-    function _reflectFee(uint256 rFee, uint256 rBurn, uint256 tFee, uint256 tBurn) private {
-        _rTotal = _rTotal.sub(rFee).sub(rBurn);
+    function _reflectFee(uint256 rFee, uint256 rBurn, uint256 rDev, uint256 rFarm, uint256 rIlp, uint256 tFee, uint256 tBurn) private {
+        _rTotal = _rTotal.sub(rFee).add(rDev).add(rFarm).add(rIlp).sub(rBurn);
         _tFeeTotal = _tFeeTotal.add(tFee);
         _tBurnTotal = _tBurnTotal.add(tBurn);
         _tTotal = _tTotal.sub(tBurn);
@@ -723,8 +814,9 @@ contract DefyCoin is Context, IBEP20, Ownable {
     function _getTValues(uint256 tAmount, uint256 burnFee) private view returns (uint256, uint256, uint256) {
 
         uint256 tBurn = ((tAmount.mul(burnFee)).div(_GRANULARITY)).div(100);
-        (,,,uint256 tTax, uint256 tFarm, uint256 tDev) = _getValues2(tAmount);  
-        uint256 tFee = tTax.add(tFarm).add(tDev);
+        (,,,uint256 tTax, uint256 tFarm, uint256 tDev) = _getValues2(tAmount);
+        (, uint256 tIlp) = _getIlp(tAmount);
+        uint256 tFee = tTax.add(tFarm).add(tDev).add(tIlp);
         uint256 tTransferAmount = tAmount.sub(tFee).sub(tBurn);
         return (tTransferAmount, tFee, tBurn);
     }
@@ -734,7 +826,8 @@ contract DefyCoin is Context, IBEP20, Ownable {
         
         uint256 rBurn = tBurn.mul(currentRate);
         (uint256 rTax, uint256 rFarm, uint256 rDev, , , ) = _getValues2(tAmount);
-        uint256 rFee = rTax.add(rFarm).add(rDev);
+        (uint256 rIlp,) = _getIlp(tAmount);
+        uint256 rFee = rTax.add(rFarm).add(rDev).add(rIlp);
         uint256 rTransferAmount = rAmount.sub(rFee).sub(rBurn);
         return (rAmount, rTransferAmount, rFee);
     }
@@ -746,7 +839,7 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return (rTax, rFarm, rDev, tTax, tFarm, tDev);
     }
     
-        function _getValues3(uint256 tAmount) private view returns (uint256, uint256, uint256) {
+    function _getValues3(uint256 tAmount) private view returns (uint256, uint256, uint256) {
         ( uint256 rTax, uint256 rFarm, uint256 rDev,,,) = _getValues2(tAmount);
         return (rTax, rFarm, rDev);
     }
@@ -764,7 +857,23 @@ contract DefyCoin is Context, IBEP20, Ownable {
         uint256 rTax = tTax.mul(currentRate);
         return (rFarm, rDev, rTax);
     }
+    
+    function _getIlp(uint256 tAmount) private view returns (uint256, uint256) {
+        (uint256 tIlp) = _getTIlp(tAmount, _ILP_FEE);
+        uint256 currentRate =  _getRate();
+        (uint256 rIlp) = _getRIlp(tIlp, currentRate);
+        return (rIlp, tIlp);
+    }
+    
+    function _getTIlp(uint256 tAmount, uint256 ilpFee) private pure returns (uint256) {
+        uint256 tIlp = ((tAmount.mul(ilpFee)).div(_GRANULARITY)).div(100);
+        return (tIlp);
+    }
 
+    function _getRIlp(uint256 tIlp, uint256 currentRate) private pure returns (uint256) {
+        uint256 rIlp = tIlp.mul(currentRate);
+        return (rIlp);
+    }
 
     function _getRate() private view returns(uint256) {
         (uint256 rSupply, uint256 tSupply) = _getCurrentSupply();
@@ -783,11 +892,11 @@ contract DefyCoin is Context, IBEP20, Ownable {
         return (rSupply, tSupply);
     }
     
-    function _getTaxFee() private view returns(uint256) {
+    function _getTaxFee() private pure returns(uint256) {
         return _TAX_FEE;
     }
 
-    function _getMaxTxAmount() private view returns(uint256) {
+    function _getMaxTxAmount() private pure returns(uint256) {
         return _MAX_TX_SIZE;
     }
     
